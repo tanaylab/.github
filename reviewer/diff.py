@@ -82,6 +82,11 @@ def git_diff(repo: str, args: str) -> str:
     return r.stdout
 
 
+def merge_base(repo: str, ref: str, head_sha: str) -> str | None:
+    r = _git(repo, "merge-base", ref, head_sha)
+    return r.stdout.strip() if r.returncode == 0 else None
+
+
 def review_range(repo: str, base_sha: str, head_sha: str, last_reviewed: str | None) -> tuple[str, str]:
     """(git diff range, label). Only what changed since last_reviewed when that is safe, else the whole PR."""
     full = (f"{base_sha}...{head_sha}", "this PR")

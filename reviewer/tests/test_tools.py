@@ -61,3 +61,17 @@ def test_tool_schemas(tools):
     assert set(t["read_file"].input_schema["properties"]) == {"path", "start_line", "end_line"}
     assert set(t["grep"].input_schema["properties"]) == {"pattern", "path"}
     assert set(t["list_dir"].input_schema["properties"]) == {"path"}
+
+
+def test_grep_pattern_starting_with_dash(tools):
+    root, t = tools
+    out = call(t["grep"], pattern=f"-Otouch {root}/PWNED #", path=".")
+    assert not (root / "PWNED").exists()
+    assert "PWNED" not in out
+
+
+def test_rejects_git_dir(tools):
+    _, t = tools
+    assert call(t["read_file"], path=".git/config").startswith("error:")
+    assert call(t["read_file"], path="src/../.git/config").startswith("error:")
+    assert call(t["list_dir"], path=".git").startswith("error:")

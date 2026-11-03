@@ -127,3 +127,40 @@ def test_rejected_inline_comment_reposts_in_body(monkeypatch):
     review._post("tanaylab/x", "5", payload)
     assert len(calls) == 2 and calls[1]["comments"] == []
     assert "**Suggested fix:** Use `<=`." in calls[1]["body"]
+
+
+def _msg(stop_reason, text):
+    from types import SimpleNamespace
+    return SimpleNamespace(stop_reason=stop_reason, content=[SimpleNamespace(type="text", text=text)])
+
+
+def test_parse_findings_only_on_end_turn():
+    from reviewer.review import parse_findings
+    ok = '{"findings": []}'
+    assert parse_findings(_msg("end_turn", ok)) == []
+    assert parse_findings(_msg("max_tokens", '{"findings": [')) is None
+    assert parse_findings(_msg("tool_use", "let me look")) is None
+    assert parse_findings(_msg("end_turn", "not json")) is None
+    assert parse_findings(_msg("refusal", "")) is None
+    assert parse_findings(None) is None
+
+
+def test_unfinished_reply_posts_nothing(env, monkeypatch):
+    diff = "diff --git a/a.R b/a.R\n--- a/a.R\n+++ b/a.R\n@@ -1 +1 @@\n-a\n+b\n"
+    monkeypatch.setattr(review, "git_diff", lambda repo, args: diff)
+    monkeypatch.setattr(review, "run_claude", lambda *a: None)
+    assert review.main() == 0
+    assert env == []
+
+
+def test_unexpected_error_exits_zero(env, monkeypatch, capsys):
+    diff = "diff --git a/a.R b/a.R\n--- a/a.R\n+++ b/a.R\n@@ -1 +1 @@\n-a\n+b\n"
+    monkeypatch.setattr(review, "git_diff", lambda repo, args: diff)
+
+    def boom(*a):
+        raise KeyError("findings")
+
+    monkeypatch.setattr(review, "run_claude", boom)
+    assert review.main() == 0
+    assert env == []
+    assert "::warning::Claude review skipped" in capsys.readouterr().out

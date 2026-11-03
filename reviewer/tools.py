@@ -14,7 +14,10 @@ def make_tools(root: str) -> list:
 
     def resolve(path: str) -> str | None:
         p = os.path.realpath(os.path.join(root, path))
-        return p if p == root or p.startswith(root + os.sep) else None
+        if not (p == root or p.startswith(root + os.sep)):
+            return None
+        # .git/config holds the checkout's token; nothing in .git is needed for a review.
+        return None if os.path.relpath(p, root).split(os.sep)[0] == ".git" else p
 
     @beta_tool
     def read_file(path: str, start_line: int = 1, end_line: int = MAX_READ) -> str:
@@ -27,7 +30,7 @@ def make_tools(root: str) -> list:
         """
         p = resolve(path)
         if p is None:
-            return "error: path is outside the repository"
+            return "error: path is outside the repository or not allowed"
         if not os.path.isfile(p):
             return "error: no such file"
         with open(p, "rb") as f:
@@ -49,8 +52,8 @@ def make_tools(root: str) -> list:
         """
         p = resolve(path)
         if p is None:
-            return "error: path is outside the repository"
-        r = subprocess.run(["git", "-C", root, "grep", "-n", "-I", "-E", pattern, "--", os.path.relpath(p, root)],
+            return "error: path is outside the repository or not allowed"
+        r = subprocess.run(["git", "-C", root, "grep", "-n", "-I", "-E", "-e", pattern, "--", os.path.relpath(p, root)],
                            capture_output=True, text=True)
         if r.returncode == 1:
             return "no matches"
@@ -68,7 +71,7 @@ def make_tools(root: str) -> list:
         """
         p = resolve(path)
         if p is None:
-            return "error: path is outside the repository"
+            return "error: path is outside the repository or not allowed"
         if not os.path.isdir(p):
             return "error: no such directory"
         return "\n".join(e.name + ("/" if e.is_dir() else "") for e in sorted(os.scandir(p), key=lambda e: e.name)

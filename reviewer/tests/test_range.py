@@ -61,3 +61,13 @@ def test_merge_from_base_falls_back_to_full(repo):
     git(r, "merge", "-q", "--no-edit", "main")
     head = git(r, "rev-parse", "HEAD")
     assert review_range(str(r), new_base, head, c2) == (f"{new_base}...{head}", "this PR")
+
+
+def test_merge_base_ignores_stale_base(repo):
+    from reviewer.diff import merge_base
+    r, base, c1, c2 = repo
+    git(r, "checkout", "-q", "main")
+    commit(r, "f.txt", "1\n")
+    git(r, "checkout", "-q", "pr")
+    assert merge_base(str(r), "main", c2) == base
+    assert merge_base(str(r), "no-such-ref", c2) is None
