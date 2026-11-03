@@ -1,0 +1,72 @@
+"""Unified diff helpers and choosing which commits to review."""
+
+import os
+import re
+import subprocess
+from fnmatch import fnmatch
+
+# Matched against both the full path and the file name.
+SKIP_PATTERNS = [
+    "*.lock", "package-lock.json", "renv.lock", "Manifest.toml", "*.min.js",
+    "*.svg", "*.png", "*.jpg", "*.pdf", "*.ipynb", "*.rds", "*.RData",
+    "*.parquet", "*.h5ad", "*/vendor/*", "vendor/*", "man/*.Rd", "NAMESPACE",
+    "docs/reference/*",
+]
+
+HUNK = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@")
+
+
+def _sections(text: str) -> list[str]:
+    return [s for s in re.split(r"(?m)^(?=diff --git )", text) if s.startswith("diff --git ")]
+
+
+def _new_path(section: str) -> str | None:
+    """New-side path, or None for a deleted file. Binary/mode-only sections fall back to the header."""
+    m = re.search(r"(?m)^\+\+\+ (.+)$", section)
+    if m:
+        p = m.group(1)
+        return None if p == "/dev/null" else p.removeprefix("b/")
+    m = re.match(r"diff --git a/.* b/(.+)$", section.splitlines()[0])
+    return m.group(1) if m else None
+
+
+def _skipped(path: str) -> bool:
+    return any(fnmatch(path, p) or fnmatch(os.path.basename(path), p) for p in SKIP_PATTERNS)
+
+
+def parse_diff(text: str) -> dict[str, set[int]]:
+    """New-side path -> new-side line numbers that appear in hunks (added and context)."""
+    out: dict[str, set[int]] = {}
+    for sec in _sections(text):
+        if "\nBinary files " in sec or "\nGIT binary patch" in sec:
+            continue
+        path = _new_path(sec)
+        if path is None:
+            continue
+        lines = out.setdefault(path, set())
+        n = None
+        for line in sec.splitlines():
+            m = HUNK.match(line)
+            if m:
+                n = int(m.group(1))
+            elif n is not None and line[:1] in (" ", "+"):
+                lines.add(n)
+                n += 1
+    return out
+
+
+def filter_diff(text: str) -> str:
+    """The diff with sections for SKIP_PATTERNS files removed."""
+    keep = []
+    for sec in _sections(text):
+        path = _new_path(sec) or re.match(r"diff --git a/(\S+)", sec).group(1)
+        if not _skipped(path):
+            keep.append(sec)
+    return "".join(keep)
+
+
+def changed_lines(text: str) -> int:
+    return sum(
+        1 for line in text.splitlines()
+        if line[:1] in ("+", "-") and not line.startswith(("+++ ", "--- "))
+    )
