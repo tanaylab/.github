@@ -70,3 +70,28 @@ def changed_lines(text: str) -> int:
         1 for line in text.splitlines()
         if line[:1] in ("+", "-") and not line.startswith(("+++ ", "--- "))
     )
+
+
+def _git(repo: str, *args: str) -> subprocess.CompletedProcess:
+    return subprocess.run(["git", "-C", repo, *args], capture_output=True, text=True)
+
+
+def git_diff(repo: str, args: str) -> str:
+    r = _git(repo, "diff", "--no-color", args)
+    r.check_returncode()
+    return r.stdout
+
+
+def review_range(repo: str, base_sha: str, head_sha: str, last_reviewed: str | None) -> tuple[str, str]:
+    """(git diff range, label). Only what changed since last_reviewed when that is safe, else the whole PR."""
+    full = (f"{base_sha}...{head_sha}", "this PR")
+    if not last_reviewed or last_reviewed == head_sha:
+        return full
+    if _git(repo, "cat-file", "-e", f"{last_reviewed}^{{commit}}").returncode != 0:
+        return full
+    if _git(repo, "merge-base", "--is-ancestor", last_reviewed, head_sha).returncode != 0:
+        return full
+    merges = _git(repo, "rev-list", "--min-parents=2", f"{last_reviewed}..{head_sha}")
+    if merges.returncode != 0 or merges.stdout.strip():
+        return full
+    return (f"{last_reviewed}..{head_sha}", f"{last_reviewed[:7]}..{head_sha[:7]}")
