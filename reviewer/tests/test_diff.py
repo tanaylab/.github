@@ -84,3 +84,26 @@ def test_filter_keeps_unskipped():
 
 def test_changed_lines_ignores_headers():
     assert changed_lines(MODIFY) == 3
+
+
+def _file(path, n):
+    return f"diff --git a/{path} b/{path}\n--- a/{path}\n+++ b/{path}\n@@ -0,0 +1,{n} @@\n" + "+x\n" * n
+
+
+def test_data_files_skipped():
+    for p in ["splits/fold0.bed", "res/table.tsv", "x.csv", "genome.fa"]:
+        assert filter_diff(_file(p, 2)) == "", p
+
+
+def test_fit_diff_keeps_all_when_small():
+    from reviewer.diff import fit_diff
+    d = _file("a.py", 5) + _file("b.yaml", 5)
+    assert fit_diff(d, 100) == (d, [])
+
+
+def test_fit_diff_code_first_then_what_fits():
+    from reviewer.diff import fit_diff
+    big_cfg, code, huge_code, small_cfg = _file("c.yaml", 60), _file("a.py", 50), _file("b.R", 500), _file("d.yaml", 10)
+    kept, left = fit_diff(big_cfg + code + huge_code + small_cfg, 100)
+    assert kept == code + small_cfg
+    assert left == ["c.yaml", "b.R"]

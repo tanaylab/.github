@@ -11,7 +11,12 @@ SKIP_PATTERNS = [
     "*.svg", "*.png", "*.jpg", "*.pdf", "*.ipynb", "*.rds", "*.RData",
     "*.parquet", "*.h5ad", "*/vendor/*", "vendor/*", "man/*.Rd", "NAMESPACE",
     "docs/reference/*",
+    # data, not code
+    "*.tsv", "*.csv", "*.bed", "*.bedGraph", "*.bedgraph", "*.fa", "*.fasta", "*.gz",
 ]
+
+CODE_EXT = {".py", ".R", ".r", ".jl", ".c", ".cc", ".cpp", ".h", ".hpp", ".js", ".ts",
+            ".rs", ".go", ".java", ".sh", ".pl"}
 
 HUNK = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@")
 
@@ -63,6 +68,27 @@ def filter_diff(text: str) -> str:
         if not _skipped(path):
             keep.append(sec)
     return "".join(keep)
+
+
+def fit_diff(text: str, limit: int) -> tuple[str, list[str]]:
+    """The part of the diff that fits in `limit` changed lines, and the paths left out.
+
+    Code files first, then the rest, each in diff order; a file is added when it still fits.
+    """
+    secs = _sections(text)
+    if changed_lines(text) <= limit:
+        return text, []
+    def path(sec):
+        return _new_path(sec) or re.match(r"diff --git a/(\S+)", sec).group(1)
+    order = sorted(range(len(secs)), key=lambda i: os.path.splitext(path(secs[i]))[1] not in CODE_EXT)
+    keep, used = set(), 0
+    for i in order:
+        n = changed_lines(secs[i])
+        if used + n <= limit:
+            keep.add(i)
+            used += n
+    return ("".join(secs[i] for i in sorted(keep)),
+            [path(secs[i]) for i in range(len(secs)) if i not in keep])
 
 
 def changed_lines(text: str) -> int:

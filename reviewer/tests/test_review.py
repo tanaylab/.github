@@ -75,11 +75,31 @@ def test_empty_after_skip_posts_no_issues(env, monkeypatch):
     assert env[0]["commit_id"] == "h" * 40
 
 
-def test_too_large_posts_note(env, monkeypatch):
-    big = "diff --git a/a.R b/a.R\n--- a/a.R\n+++ b/a.R\n@@ -0,0 +1,3001 @@\n" + "+x\n" * 3001
-    monkeypatch.setattr(review, "git_diff", lambda repo, args: big)
+def _file(path, n):
+    return f"diff --git a/{path} b/{path}\n--- a/{path}\n+++ b/{path}\n@@ -0,0 +1,{n} @@\n" + "+x\n" * n
+
+
+def test_nothing_fits_posts_note(env, monkeypatch):
+    monkeypatch.setattr(review, "git_diff", lambda repo, args: _file("a.R", review.MAX_CHANGED + 1))
     assert review.main() == 0
-    assert env[0]["body"].endswith("This diff (3001 changed lines) is too large to review automatically.")
+    assert env[0]["body"].endswith("Not reviewed, too large to fit in one review: a.R")
+
+
+def test_large_diff_reviews_what_fits(env, monkeypatch):
+    small, big = _file("a.R", 3), _file("b.yaml", review.MAX_CHANGED)
+    monkeypatch.setattr(review, "git_diff", lambda repo, args: small + big)
+    seen = []
+    monkeypatch.setattr(review, "run_claude", lambda diff, *a: seen.append(diff) or [])
+    assert review.main() == 0
+    assert seen == [small]
+    assert env[0]["body"] == f"{MARKER}\nNo issues found in this PR.\n\nNot reviewed, too large to fit in one review: b.yaml"
+
+
+def test_build_review_lists_left_out():
+    r = build_review([FINDINGS[1]], {"a.R": {12}}, "this PR", [f"f{i}.yaml" for i in range(25)])
+    last = r["body"].splitlines()[-1]
+    assert last.startswith("Not reviewed, too large to fit in one review: f0.yaml, f1.yaml")
+    assert last.endswith("f19.yaml and 5 more")
 
 
 def test_already_reviewed_head_posts_nothing(env, monkeypatch):
