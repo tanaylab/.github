@@ -16,6 +16,7 @@ BOT = "github-actions[bot]"
 MAX_CHANGED = 20000
 LEFT_OUT = "Not reviewed, too large to fit in one review: "
 MODEL = "claude-opus-5-5"
+MAX_ITERATIONS = 20  # requests to Claude per review (the SDK's max_iterations); the last one may not call tools
 
 FINDINGS_SCHEMA = {
     "type": "object",
@@ -97,7 +98,7 @@ def run_claude(diff: str, title: str, body: str, root: str, left_out: list[str] 
     runner = client.beta.messages.tool_runner(
         model=MODEL,
         max_tokens=64000,
-        max_iterations=20,
+        max_iterations=MAX_ITERATIONS,
         thinking={"type": "adaptive"},
         output_config={"effort": "high", "format": {"type": "json_schema", "schema": FINDINGS_SCHEMA}},
         betas=["server-side-fallback-2026-07-01"],
@@ -109,11 +110,14 @@ def run_claude(diff: str, title: str, body: str, root: str, left_out: list[str] 
         stream=True,  # replies this long need streaming
     )
     last, tin, tout = None, 0, 0
-    for stream in runner:
+    for iteration, stream in enumerate(runner, start=1):
         message = last = stream.get_final_message()
         u = message.usage
         tin += (u.input_tokens or 0) + (u.cache_read_input_tokens or 0) + (u.cache_creation_input_tokens or 0)
         tout += u.output_tokens or 0
+        if iteration == MAX_ITERATIONS - 1 and message.stop_reason == "tool_use":
+            # A large PR can use up the iterations reading code; the last one must return the findings.
+            runner.set_messages_params(lambda p: {**p, "tool_choice": {"type": "none"}})
     print(f"usage: input_tokens={tin} output_tokens={tout}")
     findings = parse_findings(last)
     if findings is None:

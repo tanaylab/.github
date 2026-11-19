@@ -184,3 +184,33 @@ def test_unexpected_error_exits_zero(env, monkeypatch, capsys):
     assert review.main() == 0
     assert env == []
     assert "::warning::Claude review skipped" in capsys.readouterr().out
+
+
+def test_last_iteration_may_not_call_tools(monkeypatch):
+    from types import SimpleNamespace
+    usage = SimpleNamespace(input_tokens=1, cache_read_input_tokens=0, cache_creation_input_tokens=0, output_tokens=1)
+
+    class FakeRunner:
+        """Asks for tools on every iteration until tool_choice is set to none."""
+        def __init__(self):
+            self.params = {"messages": []}
+
+        def set_messages_params(self, f):
+            self.params = f(self.params)
+
+        def __iter__(self):
+            for _ in range(review.MAX_ITERATIONS):
+                if self.params.get("tool_choice") == {"type": "none"}:
+                    msg = SimpleNamespace(stop_reason="end_turn", usage=usage,
+                                          content=[SimpleNamespace(type="text", text='{"findings": []}')])
+                else:
+                    msg = SimpleNamespace(stop_reason="tool_use", usage=usage, content=[])
+                yield SimpleNamespace(get_final_message=lambda m=msg: m)
+                if msg.stop_reason == "end_turn":
+                    return
+
+    runner = FakeRunner()
+    client = SimpleNamespace(beta=SimpleNamespace(messages=SimpleNamespace(tool_runner=lambda **kw: runner)))
+    monkeypatch.setattr(review.anthropic, "Anthropic", lambda: client)
+    monkeypatch.setattr(review, "make_tools", lambda root: [])
+    assert review.run_claude("diff", "t", "b", "/tmp") == []
