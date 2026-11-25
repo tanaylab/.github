@@ -108,6 +108,7 @@ def run_claude(diff: str, title: str, body: str, root: str, left_out: list[str] 
         tools=make_tools(root),
         messages=[{"role": "user", "content": user}],
         stream=True,  # replies this long need streaming
+        thread=False,  # a message thread fixes tool_choice, and the last iteration changes it
     )
     last, tin, tout = None, 0, 0
     for iteration, stream in enumerate(runner, start=1):
@@ -155,8 +156,11 @@ def main() -> int:
     repo, n = os.environ["GITHUB_REPOSITORY"], os.environ["PR_NUMBER"]
     head, root = os.environ["HEAD_SHA"], os.environ["REPO_DIR"]
     # pull_request.base.sha can lag behind the base branch; the merge base with its tip cannot.
+    # Once the PR is merged the tip holds the head, so then the base the event saw is used.
     ref = os.environ.get("BASE_REF")
-    base = (merge_base(root, f"origin/{ref}", head) if ref else None) or os.environ["BASE_SHA"]
+    base = merge_base(root, f"origin/{ref}", head) if ref else None
+    if base in (None, head):
+        base = merge_base(root, os.environ["BASE_SHA"], head) or os.environ["BASE_SHA"]
 
     last = last_reviewed_sha(gh_reviews(repo, n))
     if last == head:

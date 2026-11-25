@@ -209,8 +209,23 @@ def test_last_iteration_may_not_call_tools(monkeypatch):
                 if msg.stop_reason == "end_turn":
                     return
 
-    runner = FakeRunner()
-    client = SimpleNamespace(beta=SimpleNamespace(messages=SimpleNamespace(tool_runner=lambda **kw: runner)))
+    runner, kw = FakeRunner(), {}
+    client = SimpleNamespace(beta=SimpleNamespace(messages=SimpleNamespace(
+        tool_runner=lambda **k: kw.update(k) or runner)))
     monkeypatch.setattr(review.anthropic, "Anthropic", lambda: client)
     monkeypatch.setattr(review, "make_tools", lambda root: [])
     assert review.run_claude("diff", "t", "b", "/tmp") == []
+    # On a message thread (the runner's default) tool_choice can't change between turns: the API returns 400.
+    assert kw["thread"] is False
+
+
+def test_merged_pr_diffs_from_the_event_base(env, monkeypatch):
+    # Once the PR is merged, the base branch tip holds the head, so the merge base with it is the head itself.
+    monkeypatch.setenv("BASE_REF", "main")
+    fork = "f" * 40
+    monkeypatch.setattr(review, "merge_base", lambda root, ref, head: head if ref == "origin/main" else fork)
+    seen = []
+    monkeypatch.setattr(review, "review_range", lambda root, base, *a: seen.append(base) or ("b...h", "this PR"))
+    monkeypatch.setattr(review, "git_diff", lambda repo, args: "")
+    assert review.main() == 0
+    assert seen == [fork]
